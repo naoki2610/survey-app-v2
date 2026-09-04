@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+<title>現場境界逆打ち計算システム V2</title>
+
+<!-- PWA 設定 -->
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#1d4ed8">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="逆打ち測量V2">
+<link rel="apple-touch-icon" href="./icon-512.png">
+
+<style>
+  :root {
+    --bg-body: #f1f5f9; --bg-card: #ffffff; --text-main: #1e293b; --text-sub: #64748b;
+    --border: #cbd5e1; --border-width: 1px; --primary: #1d4ed8;
+    --guidance-bg: linear-gradient(145deg, #1e3a8a, #2563eb); --guidance-text: #ffffff;
+    --guidance-sub: #cbd5e1; --guidance-box-bg: rgba(0,0,0,0.15);
+    --btn-bg: #e2e8f0; --btn-text: #334155; --active-row: #dbeafe; --canvas-bg: #fafafa;
+  }
+  [data-theme="sunlight"] {
+    --bg-body: #ffffff; --bg-card: #ffffff; --text-main: #000000; --text-sub: #000000;
+    --border: #000000; --border-width: 2px; --primary: #000000;
+    --guidance-bg: #000000; --guidance-text: #ffffff; --guidance-sub: #ffffff;
+    --guidance-box-bg: #222222; --btn-bg: #ffffff; --btn-text: #000000;
+    --active-row: #e2e8f0; --canvas-bg: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: sans-serif; margin: 0; padding: 10px; background-color: var(--bg-body); color: var(--text-main); -webkit-tap-highlight-color: transparent; }
+  header { display: flex; justify-content: space-between; align-items: center; padding: 4px 6px 10px 6px; }
+  header h1 { font-size: 1.15rem; margin: 0; color: var(--text-main); }
+  .theme-btn { padding: 6px 12px; font-weight: bold; border-radius: 6px; cursor: pointer; border: 2px solid var(--border); background: var(--btn-bg); color: var(--btn-text); }
+  
+  .app-layout { display: flex; flex-direction: column; gap: 10px; }
+  @media (min-width: 860px) { .app-layout { display: grid; grid-template-columns: 370px 1fr; align-items: start; } }
+  
+  .card { background: var(--bg-card); border-radius: 8px; padding: 10px; border: var(--border-width) solid var(--border); margin-bottom: 10px; }
+  .card-title { font-weight: 800; font-size: 0.95rem; color: var(--primary); border-left: 4px solid var(--primary); padding-left: 6px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+  
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  label { display: block; font-size: 0.75rem; font-weight: bold; color: var(--text-sub); margin-bottom: 2px; }
+  input[type="text"], input[type="number"] { width: 100%; padding: 6px 8px; font-size: 1rem; font-weight: bold; border: var(--border-width) solid var(--border); border-radius: 6px; }
+  
+  .btn { display: inline-flex; justify-content: center; align-items: center; padding: 8px 12px; font-size: 0.9rem; font-weight: bold; border-radius: 6px; border: var(--border-width) solid var(--border); cursor: pointer; background: var(--btn-bg); color: var(--btn-text); touch-action: manipulation; }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-sm { padding: 4px 8px; font-size: 0.8rem; }
+  .btn-action { width: 24px; height: 24px; border-radius: 4px; border: 1px solid var(--border); background: var(--btn-bg); font-weight: bold; font-size: 0.75rem; cursor: pointer; margin-left: 2px; }
+  
+  .guidance-box { background: var(--guidance-bg); color: var(--guidance-text); border-radius: 8px; padding: 10px; border: var(--border-width) solid var(--border); }
+  .guidance-values { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+  .guidance-item { background: var(--guidance-box-bg); border: 1px solid rgba(255,255,255,0.3); padding: 8px; border-radius: 6px; }
+  .guidance-main-val { font-size: 1.5rem; font-weight: 900; font-family: monospace; letter-spacing: -0.5px; }
+  
+  .table-container { max-height: 180px; overflow-y: auto; border: var(--border-width) solid var(--border); border-radius: 6px; margin-top: 6px; background: #fff; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th, td { padding: 6px 4px; text-align: left; border-bottom: 1px solid var(--border); color: var(--text-main); }
+  th { background-color: var(--bg-body); font-weight: bold; position: sticky; top: 0; z-index: 1; }
+  tr.active-row { background-color: var(--active-row) !important; font-weight: bold; outline: 2px solid var(--border); }
+  
+  .canvas-card { display: flex; flex-direction: column; height: calc(100vh - 170px); min-height: 400px; margin-top:0;}
+  .canvas-wrapper { flex: 1; position: relative; width: 100%; height: 100%; background: var(--canvas-bg); border: var(--border-width) solid var(--border); border-radius: 6px; overflow: hidden; touch-action: none; /* スクロール防止 */ }
+  canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
+  
+  /* モーダルUI */
+  #modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 999; justify-content: center; align-items: center; }
+  .modal-content { background: #fff; padding: 20px; border-radius: 8px; width: 90%; max-width: 320px; color: #000; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+  .toast { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: #f59e0b; color: #fff; padding: 8px 16px; border-radius: 20px; font-weight: bold; font-size: 0.9rem; z-index: 10; pointer-events: none; opacity: 0; transition: opacity 0.3s; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📐 現場境界逆打ち計算 V2</h1>
+  <button class="theme-btn" id="btn-theme" onclick="toggleSunlightMode()">☀️ 日照</button>
+</header>
+
+<div class="app-layout">
+  <!-- 左カラム -->
+  <div>
+    <!-- 画像・図面設定パネル (NEW) -->
+    <div class="card" style="background-color: #f8fafc;">
+      <div class="card-title" style="color:#0f766e; border-color:#0f766e;">画像・オルソ図面 背景設定</div>
+      <div style="display: flex; gap: 6px;">
+        <input type="file" id="image-upload" accept="image/*" style="display: none;" onchange="loadImage(event)">
+        <button class="btn" style="flex:1; background:#ccfbf1; color:#0f766e;" onclick="document.getElementById('image-upload').click()">🖼 画像読込</button>
+        <button class="btn" style="flex:1;" onclick="startCalibration()">📍 位置合わせ</button>
+        <button class="btn" style="flex:0.5;" onclick="clearImage()">🗑</button>
+      </div>
+    </div>
+
+    <!-- 基準点設定 -->
+    <div class="card">
+      <div class="grid-2">
+        <div><label id="label-ax">器械点 A: X</label><input type="number" step="any" id="ax" oninput="saveAndRecalc()"></div>
+        <div><label id="label-ay">器械点 A: Y</label><input type="number" step="any" id="ay" oninput="saveAndRecalc()"></div>
+        <div><label id="label-bx">後視点 B: X</label><input type="number" step="any" id="bx" oninput="saveAndRecalc()"></div>
+        <div><label id="label-by">後視点 B: Y</label><input type="number" step="any" id="by" oninput="saveAndRecalc()"></div>
+      </div>
+    </div>
+
+    <!-- 境界点リスト -->
+    <div class="card">
+      <div class="card-title">
+        <span>設置点 / 境界点リスト</span>
+        <button class="btn btn-sm" onclick="clearAllPoints()">全消去</button>
+      </div>
+      <div class="grid-3">
+        <input type="text" id="new-name" placeholder="点名">
+        <input type="number" step="any" id="new-x" placeholder="X座標">
+        <input type="number" step="any" id="new-y" placeholder="Y座標">
+      </div>
+      <button class="btn btn-primary" style="width: 100%; margin-top: 6px;" onclick="addPointFromInput()">＋ 点を追加</button>
+      
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr><th style="width: 25px;">#</th><th>点名</th><th>X</th><th>Y</th><th style="width: 75px;"></th></tr>
+          </thead>
+          <tbody id="point-list-body"></tbody>
+        </table>
+      </div>
+      
+      <div style="display: flex; gap: 6px; margin-top: 6px;">
+        <input type="file" id="data-file-input" accept=".csv,.txt,.sim" style="display: none;" onchange="importFile(event)">
+        <button class="btn" style="flex:1;" onclick="document.getElementById('data-file-input').click()">📂 座標読込</button>
+        <button class="btn" style="flex:1;" onclick="exportCSV()">💾 CSV保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右カラム -->
+  <div class="canvas-card">
+    <div class="guidance-box">
+      <div style="display: flex; justify-content: space-between;">
+        <div style="font-weight:bold;" id="target-name">目標点: 未選択</div>
+        <div style="font-size: 0.85rem;" id="target-azimuth">方位角: ---</div>
+      </div>
+      <div class="guidance-values">
+        <div class="guidance-item">
+          <div style="font-size:0.75rem;">水平角 (振角・右回)</div>
+          <div class="guidance-main-val" id="res-angle">00°00'00"</div>
+        </div>
+        <div class="guidance-item">
+          <div style="font-size:0.75rem;">水平距離 (HD)</div>
+          <div class="guidance-main-val" id="res-dist">0.000 m</div>
+        </div>
+      </div>
+      <div style="display: grid; grid-template-columns: 1fr 1.5fr 1fr; gap: 6px; margin-top: 6px;">
+        <button class="btn" onclick="prevPoint()">◀ 前</button>
+        <button class="btn" id="btn-status" onclick="markDoneAndNext()">✔ 確定して次へ</button>
+        <button class="btn" onclick="nextPoint()">次 ▶</button>
+      </div>
+    </div>
+
+    <div class="card" style="flex:1; display:flex; flex-direction:column; margin-top:10px; margin-bottom:0;">
+      <div class="card-title">
+        <span>配置プロット図 (スワイプ＆ズーム対応)</span>
+        <button class="btn btn-sm" onclick="resetView()">全体表示</button>
+      </div>
+      <div class="canvas-wrapper">
+        <div id="toast-msg" class="toast">メッセージ</div>
+        <canvas id="plotCanvas"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 位置合わせ用モーダル -->
+<div id="modal-overlay">
+  <div class="modal-content">
+    <h3 style="margin-top:0; color:#0f766e;">対応する測量点を選択</h3>
+    <p style="font-size:0.85rem; color:#475569;">タップした場所の測量座標（基準点など）を選んでください。</p>
+    <select id="calib-point-select" style="width:100%; padding:10px; font-size:1.1rem; margin-bottom:20px; font-weight:bold;"></select>
+    <div style="display:flex; gap:10px;">
+      <button class="btn btn-primary" style="flex:1;" onclick="submitCalib()">確定</button>
+      <button class="btn" style="flex:1;" onclick="cancelCalib()">キャンセル</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let state = {
+    theme: 'default',
+    ax: 0, ay: 0, bx: 10, by: 0, nameA: '', nameB: '',
+    points: [], selectedIndex: 0,
+    imgCalib: null // {px1, py1, gx1, gy1, px2, py2, gx2, gy2}
+  };
+
+  // 画像オブジェクト (データ容量削減のためLocalStorageには保存せずメモリ保持)
+  let imgObj = null;
+
+  // キャンバス表示用変数 (パン・ズーム)
+  let view = { cx: 0, cy: 0, scale: 10 }; 
+  let isDragging = false;
+  let lastX = 0, lastY = 0;
+  let initialPinchDist = null;
+  let initialScale = null;
+
+  // キャリブレーション用状態
+  let calibStep = 0; // 0:Off, 1:Wait Point1, 2:Wait Point2
+  let calibTemp = {};
+
+  window.addEventListener('DOMContentLoaded', () => {
+    loadLocalStorage();
+    applyTheme();
+    renderTable();
+    initCanvasEvents();
+    if(state.points.length > 0) resetView(); // 初回フィット
+    else calculateAndDraw();
+    window.addEventListener('resize', calculateAndDraw);
+  });
+
+  // --- 画像 & 位置合わせ ロジック ---
+  function loadImage(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(evt) {
+      imgObj = new Image();
+      imgObj.onload = () => { 
+        resetView(); 
+        showToast('画像を読み込みました'); 
+      };
+      imgObj.src = evt.target.result;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  }
+
+  function clearImage() {
+    if(confirm('背景画像と位置合わせ設定をクリアしますか？')) {
+      imgObj = null;
+      state.imgCalib = null;
+      calibStep = 0;
+      saveLocalStorage();
+      calculateAndDraw();
+    }
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById('toast-msg');
+    t.textContent = msg;
+    t.style.opacity = '1';
+    setTimeout(() => { if(calibStep===0) t.style.opacity = '0'; }, 3000);
+  }
+
+  function startCalibration() {
+    if (!imgObj) return alert('先に「画像読込」から図面やオルソ画像を読み込んでください。');
+    if (state.points.length === 0 && state.ax === 0 && state.bx === 0) return alert('座標データがありません。「座標読込」からデータを読み込んでください。');
+    
+    calibStep = 1;
+    showToast('【1点目】図面上の基準点(T-1等)をタップ');
+  }
+
+  function openCalibModal(step) {
+    const sel = document.getElementById('calib-point-select');
+    sel.innerHTML = '';
+    // A, B, Pointsをリスト化
+    const addOpt = (label, gx, gy) => {
+      const o = document.createElement('option');
+      o.value = `${gx},${gy}`; o.textContent = label; sel.appendChild(o);
+    };
+    if(state.nameA || state.ax!==0) addOpt(`器械点A: ${state.nameA}`, state.ax, state.ay);
+    if(state.nameB || state.bx!==0) addOpt(`後視点B: ${state.nameB}`, state.bx, state.by);
+    state.points.forEach(p => addOpt(`境界/基準: ${p.name}`, p.x, p.y));
+    
+    document.getElementById('modal-overlay').style.display = 'flex';
+  }
+
+  function cancelCalib() {
+    document.getElementById('modal-overlay').style.display = 'none';
+    calibStep = 0;
+    showToast('位置合わせをキャンセルしました');
+    setTimeout(() => { document.getElementById('toast-msg').style.opacity = '0'; }, 1000);
+  }
+
+  function submitCalib() {
+    const val = document.getElementById('calib-point-select').value.split(',');
+    const gx = parseFloat(val[0]), gy = parseFloat(val[1]);
+    document.getElementById('modal-overlay').style.display = 'none';
+
+    if (calibStep === 1) {
+      calibTemp.gx1 = gx; calibTemp.gy1 = gy;
+      calibStep = 2;
+      showToast('【2点目】図面上の別の基準点をタップ');
+    } else if (calibStep === 2) {
+      calibTemp.gx2 = gx; calibTemp.gy2 = gy;
+      state.imgCalib = { ...calibTemp };
+      calibStep = 0;
+      saveLocalStorage();
+      calculateAndDraw();
+      showToast('位置合わせ完了！(図面が測量座標とリンクしました)');
+      setTimeout(() => { document.getElementById('toast-msg').style.opacity = '0'; }, 3000);
+    }
+  }
+
+  // --- キャンバス パン＆ズーム イベント ---
+  function initCanvasEvents() {
+    const cvs = document.getElementById('plotCanvas');
+    
+    cvs.addEventListener('mousedown', (e) => {
+      if(e.button !== 0) return;
+      isDragging = true; lastX = e.clientX; lastY = e.clientY;
+    });
+    window.addEventListener('mouseup', () => { isDragging = false; });
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      const dx = e.clientX - lastX; const dy = e.clientY - lastY;
+      view.cx -= dx / view.scale; view.cy -= dy / view.scale; // PlotXY = Y, -X
+      lastX = e.clientX; lastY = e.clientY;
+      calculateAndDraw();
+    });
+
+    cvs.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const rect = cvs.getBoundingClientRect();
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      zoomCanvas(e.deltaY < 0 ? 1.15 : 1/1.15, mx, my);
+    }, {passive: false});
+
+    // タッチ対応 (スマホ/タブレット)
+    cvs.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      if(e.touches.length === 1) {
+        isDragging = true; lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+      } else if (e.touches.length === 2) {
+        isDragging = false;
+        initialPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        initialScale = view.scale;
+      }
+    }, {passive: false});
+    
+    cvs.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      if(isDragging && e.touches.length === 1) {
+        const dx = e.touches[0].clientX - lastX; const dy = e.touches[0].clientY - lastY;
+        view.cx -= dx / view.scale; view.cy -= dy / view.scale;
+        lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+        calculateAndDraw();
+      } else if (e.touches.length === 2 && initialPinchDist) {
+        const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        const ratio = dist / initialPinchDist;
+        const rect = cvs.getBoundingClientRect();
+        const mx = ((e.touches[0].clientX + e.touches[1].clientX)/2) - rect.left;
+        const my = ((e.touches[0].clientY + e.touches[1].clientY)/2) - rect.top;
+        
+        // ズーム中心を維持してスケール変更
+        const plotX = (mx - cvs.width/2) / view.scale + view.cx;
+        const plotY = (my - cvs.height/2) / view.scale + view.cy;
+        view.scale = initialScale * ratio;
+        view.cx = plotX - (mx - cvs.width/2) / view.scale;
+        view.cy = plotY - (my - cvs.height/2) / view.scale;
+        calculateAndDraw();
+      }
+    }, {passive: false});
+    
+    cvs.addEventListener('touchend', (e) => {
+      isDragging = false; initialPinchDist = null;
+    });
+
+    // キャリブレーション用クリック処理
+    cvs.addEventListener('click', (e) => {
+      if (calibStep === 0) return;
+      const rect = cvs.getBoundingClientRect();
+      const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+      
+      const plotX = (sx - cvs.width/2) / view.scale + view.cx;
+      const plotY = (sy - cvs.height/2) / view.scale + view.cy;
+      // plotX = Y, plotY = -X (Geo)
+      
+      let px, py;
+      if (state.imgCalib) {
+        // すでに位置合わせ済みの場合は逆変換
+        const cal = state.imgCalib;
+        const sG1 = { x: cal.gy1, y: -cal.gx1 };
+        const dp = Math.hypot(cal.px2 - cal.px1, cal.py2 - cal.py1);
+        const dg = Math.hypot(cal.gy2 - cal.gy1, (-cal.gx2) - (-cal.gx1));
+        const S = dg / dp;
+        const R = Math.atan2(-cal.gx2 - (-cal.gx1), cal.gy2 - cal.gy1) - Math.atan2(cal.py2 - cal.py1, cal.px2 - cal.px1);
+        const dx = plotX - sG1.x, dy = plotY - sG1.y;
+        px = cal.px1 + (1/S) * (dx * Math.cos(-R) - dy * Math.sin(-R));
+        py = cal.py1 + (1/S) * (dx * Math.sin(-R) + dy * Math.cos(-R));
+      } else {
+        // 未位置合わせ（中央表示状態）
+        const S = (cvs.width / imgObj.width) / view.scale * 0.9;
+        px = (plotX - view.cx) / S + imgObj.width/2;
+        py = (plotY - view.cy) / S + imgObj.height/2;
+      }
+      
+      if(calibStep === 1) { calibTemp.px1 = px; calibTemp.py1 = py; openCalibModal(1); }
+      else if(calibStep === 2) { calibTemp.px2 = px; calibTemp.py2 = py; openCalibModal(2); }
+    });
+  }
+
+  function zoomCanvas(factor, mx, my) {
+    const cvs = document.getElementById('plotCanvas');
+    const plotX = (mx - cvs.width/2) / view.scale + view.cx;
+    const plotY = (my - cvs.height/2) / view.scale + view.cy;
+    view.scale *= factor;
+    view.cx = plotX - (mx - cvs.width/2) / view.scale;
+    view.cy = plotY - (my - cvs.height/2) / view.scale;
+    calculateAndDraw();
+  }
+
+  function resetView() {
+    const cvs = document.getElementById('plotCanvas');
+    const p = cvs.parentElement; cvs.width = p.clientWidth; cvs.height = p.clientHeight;
+    
+    let allY = [state.ay, state.by], allX = [state.ax, state.bx];
+    state.points.forEach(pt => { allY.push(pt.y); allX.push(pt.x); });
+    
+    // Plot座標系でのMin/Max (plotX=Y, plotY=-X)
+    let minPx = Math.min(...allY), maxPx = Math.max(...allY);
+    let minPy = Math.min(...allX.map(x=>-x)), maxPy = Math.max(...allX.map(x=>-x));
+    
+    const spanX = (maxPx - minPx) || 20, spanY = (maxPy - minPy) || 20;
+    view.cx = (minPx + maxPx) / 2; view.cy = (minPy + maxPy) / 2;
+    view.scale = Math.min((cvs.width - 60) / spanX, (cvs.height - 60) / spanY);
+    calculateAndDraw();
+  }
+
+  // --- 既存のアプリロジック ---
+  function saveLocalStorage() {
+    localStorage.setItem('survey_gyakuuchi_v2', JSON.stringify(state));
+  }
+  function loadLocalStorage() {
+    const saved = localStorage.getItem('survey_gyakuuchi_v2');
+    if (saved) { try { state = JSON.parse(saved); } catch (e) {} }
+    document.getElementById('ax').value = state.ax ?? ''; document.getElementById('ay').value = state.ay ?? '';
+    document.getElementById('bx').value = state.bx ?? ''; document.getElementById('by').value = state.by ?? '';
+    updateLabels();
+  }
+  function saveAndRecalc() {
+    state.ax = parseFloat(document.getElementById('ax').value)||0; state.ay = parseFloat(document.getElementById('ay').value)||0;
+    state.bx = parseFloat(document.getElementById('bx').value)||0; state.by = parseFloat(document.getElementById('by').value)||0;
+    saveLocalStorage(); calculateAndDraw();
+  }
+  function updateLabels() {
+    document.getElementById('label-ax').textContent = state.nameA ? `A [${state.nameA}]: X` : `器械点 A: X`;
+    document.getElementById('label-ay').textContent = state.nameA ? `A [${state.nameA}]: Y` : `器械点 A: Y`;
+    document.getElementById('label-bx').textContent = state.nameB ? `B [${state.nameB}]: X` : `後視点 B: X`;
+    document.getElementById('label-by').textContent = state.nameB ? `B [${state.nameB}]: Y` : `後視点 B: Y`;
+  }
+  function setAsA(e, idx) {
+    e.stopPropagation(); const pt = state.points[idx];
+    document.getElementById('ax').value = pt.x; document.getElementById('ay').value = pt.y;
+    state.nameA = pt.name; updateLabels(); saveAndRecalc(); resetView();
+  }
+  function setAsB(e, idx) {
+    e.stopPropagation(); const pt = state.points[idx];
+    document.getElementById('bx').value = pt.x; document.getElementById('by').value = pt.y;
+    state.nameB = pt.name; updateLabels(); saveAndRecalc(); resetView();
+  }
+  function addPointFromInput() {
+    const name = document.getElementById('new-name').value.trim() || `P-${state.points.length + 1}`;
+    const x = parseFloat(document.getElementById('new-x').value), y = parseFloat(document.getElementById('new-y').value);
+    if(isNaN(x)||isNaN(y)) return alert('数値を正しく入力してください。');
+    state.points.push({ name, x, y, done: false }); state.selectedIndex = state.points.length - 1;
+    document.getElementById('new-name').value=''; document.getElementById('new-x').value=''; document.getElementById('new-y').value='';
+    saveLocalStorage(); renderTable(); resetView();
+  }
+  function selectPoint(idx) { state.selectedIndex = idx; saveLocalStorage(); renderTable(); calculateAndDraw(); }
+  function prevPoint() { if(!state.points.length) return; state.selectedIndex = (state.selectedIndex-1+state.points.length)%state.points.length; saveLocalStorage(); renderTable(); calculateAndDraw(); }
+  function nextPoint() { if(!state.points.length) return; state.selectedIndex = (state.selectedIndex+1)%state.points.length; saveLocalStorage(); renderTable(); calculateAndDraw(); }
+  function deletePoint(e, idx) { e.stopPropagation(); if(confirm(`削除しますか？`)) { state.points.splice(idx,1); if(state.selectedIndex>=state.points.length) state.selectedIndex=Math.max(0,state.points.length-1); saveLocalStorage(); renderTable(); calculateAndDraw(); } }
+  function markDoneAndNext() {
+    if(!state.points.length) return; const pt = state.points[state.selectedIndex];
+    if(!pt.done) {
+      pt.done = true; let nextIdx = -1;
+      for(let i=1; i<state.points.length; i++) { let checkIdx = (state.selectedIndex+i)%state.points.length; if(!state.points[checkIdx].done) { nextIdx = checkIdx; break; } }
+      if(nextIdx !== -1) state.selectedIndex = nextIdx;
+    } else pt.done = false;
+    saveLocalStorage(); renderTable(); calculateAndDraw();
+  }
+  function clearAllPoints() {
+    if(confirm('すべて消去しますか？')) { state.points=[]; state.selectedIndex=0; state.nameA=''; state.nameB=''; updateLabels(); saveLocalStorage(); renderTable(); calculateAndDraw(); }
+  }
+
+  function renderTable() {
+    const tbody = document.getElementById('point-list-body'); tbody.innerHTML = '';
+    state.points.forEach((pt, idx) => {
+      const tr = document.createElement('tr');
+      if(idx === state.selectedIndex) tr.className = 'active-row';
+      tr.onclick = () => selectPoint(idx);
+      tr.innerHTML = `<td>${pt.done ? '✔' : idx+1}</td><td><strong>${pt.name}</strong></td><td>${pt.x.toFixed(3)}</td><td>${pt.y.toFixed(3)}</td>
+        <td style="text-align:right; white-space:nowrap;">
+          <button class="btn-action" onclick="setAsA(event,${idx})">A</button><button class="btn-action" onclick="setAsB(event,${idx})">B</button><button class="btn-action" style="color:red;" onclick="deletePoint(event,${idx})">×</button>
+        </td>`;
+      tbody.appendChild(tr);
+    });
+    const bs = document.getElementById('btn-status');
+    if(state.points.length>0 && state.points[state.selectedIndex]) {
+      const cur = state.points[state.selectedIndex];
+      bs.textContent = cur.done ? '✔ 完了 (取消)' : '✔ 確定して次へ';
+      bs.style.background = cur.done ? 'var(--bg-body)' : 'var(--primary)';
+      bs.style.color = cur.done ? 'var(--text-main)' : '#fff';
+    }
+  }
+
+  function calculateAndDraw() {
+    const ax = state.ax, ay = state.ay, bx = state.bx, by = state.by, cur = state.points[state.selectedIndex];
+    const dxA = bx-ax, dyA = by-ay;
+    let azAB = Math.atan2(dyA, dxA); if(azAB<0) azAB+=2*Math.PI;
+    
+    if(!cur) {
+      document.getElementById('target-name').textContent = '未選択'; document.getElementById('res-angle').textContent = '---'; document.getElementById('res-dist').textContent = '---';
+    } else {
+      let azAP = Math.atan2(cur.y-ay, cur.x-ax); if(azAP<0) azAP+=2*Math.PI;
+      let diff = azAP - azAB; if(diff<0) diff+=2*Math.PI;
+      const dist = Math.hypot(cur.x-ax, cur.y-ay);
+      
+      let deg = diff * 180/Math.PI;
+      const d = Math.floor(deg), mTotal = (deg-d)*60, m = Math.floor(mTotal), s = Math.round((mTotal-m)*60);
+      const sStr = s<10?'0'+s:s, mStr = m<10?'0'+m:m;
+      document.getElementById('target-name').textContent = cur.name;
+      document.getElementById('res-angle').textContent = `${d}°${mStr}'${sStr}"`;
+      document.getElementById('res-dist').textContent = dist.toFixed(3) + ' m';
+    }
+    drawPlot();
+  }
+
+  function drawPlot() {
+    const cvs = document.getElementById('plotCanvas'); const ctx = cvs.getContext('2d');
+    const p = cvs.parentElement; cvs.width = p.clientWidth; cvs.height = p.clientHeight;
+    ctx.clearRect(0, 0, cvs.width, cvs.height);
+    const isSun = state.theme === 'sunlight';
+    
+    // 背景画像の描画
+    if (imgObj && imgObj.complete) {
+      ctx.save();
+      // Plot座標系への基本変換
+      ctx.translate(cvs.width/2, cvs.height/2);
+      ctx.scale(view.scale, view.scale);
+      ctx.translate(-view.cx, -view.cy);
+      
+      if (state.imgCalib) {
+        // 位置合わせ済み画像の配置
+        const c = state.imgCalib;
+        const sG1 = { x: c.gy1, y: -c.gx1 }, sG2 = { x: c.gy2, y: -c.gx2 };
+        const dp = Math.hypot(c.px2-c.px1, c.py2-c.py1);
+        const dg = Math.hypot(sG2.x-sG1.x, sG2.y-sG1.y);
+        const S = dg / dp;
+        const R = Math.atan2(sG2.y-sG1.y, sG2.x-sG1.x) - Math.atan2(c.py2-c.py1, c.px2-c.px1);
+        
+        ctx.translate(sG1.x, sG1.y); ctx.rotate(R); ctx.scale(S, S); ctx.translate(-c.px1, -c.py1);
+        ctx.globalAlpha = 0.8; // 画像の透過度 (測量点を見やすくするため)
+      } else {
+        // 未位置合わせ (画面中央に仮表示)
+        const S = (cvs.width / imgObj.width) / view.scale * 0.9;
+        ctx.translate(view.cx, view.cy); ctx.scale(S, S); ctx.translate(-imgObj.width/2, -imgObj.height/2);
+        ctx.globalAlpha = 0.5;
+      }
+      ctx.drawImage(imgObj, 0, 0);
+      ctx.restore();
+    }
+
+    // 測量点の描画用変換関数 (スケール依存しないサイズで描画するため手動計算)
+    const toScreen = (gx, gy) => ({ x: cvs.width/2 + (gy - view.cx)*view.scale, y: cvs.height/2 + (-gx - view.cy)*view.scale });
+    const scrA = toScreen(state.ax, state.ay), scrB = toScreen(state.bx, state.by);
+
+    // 視準線
+    ctx.beginPath(); ctx.strokeStyle = isSun?'#000':'#64748b'; ctx.lineWidth=2; ctx.setLineDash([5,5]);
+    ctx.moveTo(scrA.x, scrA.y); ctx.lineTo(scrB.x, scrB.y); ctx.stroke(); ctx.setLineDash([]);
+    
+    // 目標誘導線
+    const cur = state.points[state.selectedIndex];
+    if (cur) {
+      const scrP = toScreen(cur.x, cur.y);
+      ctx.beginPath(); ctx.strokeStyle = isSun?'#000':'#2563eb'; ctx.lineWidth=isSun?4:2.5;
+      ctx.moveTo(scrA.x, scrA.y); ctx.lineTo(scrP.x, scrP.y); ctx.stroke();
+    }
+
+    // 全点のプロット
+    state.points.forEach((pt, i) => {
+      const scrP = toScreen(pt.x, pt.y);
+      const isTarget = (i === state.selectedIndex);
+      ctx.beginPath(); ctx.arc(scrP.x, scrP.y, isTarget?7:4, 0, Math.PI*2);
+      ctx.fillStyle = pt.done ? (isSun?'#000':'#15803d') : (isTarget ? (isSun?'#000':'#2563eb') : '#94a3b8');
+      ctx.fill(); ctx.strokeStyle = isSun?'#000':'#fff'; ctx.lineWidth=1.5; ctx.stroke();
+      ctx.font = isTarget?'bold 14px sans-serif':'10px sans-serif'; ctx.fillStyle = isSun?'#000':'#1e293b';
+      ctx.fillText(pt.name, scrP.x+8, scrP.y-4);
+    });
+
+    // 器械点A
+    ctx.beginPath(); ctx.arc(scrA.x, scrA.y, 7, 0, Math.PI*2); ctx.fillStyle = isSun?'#000':'#dc2626'; ctx.fill(); ctx.stroke();
+    ctx.font = 'bold 12px sans-serif'; ctx.fillText('A', scrA.x+9, scrA.y+12);
+    // 後視点B
+    ctx.beginPath(); ctx.arc(scrB.x, scrB.y, 5, 0, Math.PI*2); ctx.fillStyle = isSun?'#000':'#64748b'; ctx.fill();
+    ctx.fillText('B', scrB.x+7, scrB.y-5);
+  }
+
+  function toggleSunlightMode() { state.theme = state.theme==='sunlight'?'default':'sunlight'; applyTheme(); saveLocalStorage(); calculateAndDraw(); }
+  function applyTheme() { const isSun=state.theme==='sunlight'; if(isSun) document.documentElement.setAttribute('data-theme','sunlight'); else document.documentElement.removeAttribute('data-theme'); }
+  
+  function importFile(e) {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(evt) {
+      const lines = evt.target.result.split(/\r\n|\n/); const newPts = [];
+      const isSima = lines.some(l => l.startsWith('A01,'));
+      lines.forEach((line, idx) => {
+        if (!line.trim()) return;
+        if (isSima) {
+          if (line.startsWith('A01,')) {
+            const c = line.split(','); if (c.length>=5) { const x=parseFloat(c[3]),y=parseFloat(c[4]); if(!isNaN(x)&&!isNaN(y)) newPts.push({name:c[2].trim(), x, y, done:false}); }
+          }
+        } else {
+          if (idx===0 && line.includes('点名')) return;
+          const c = line.split(','); if (c.length>=3) {
+            const n=c[0].trim(), x=parseFloat(c[1]), y=parseFloat(c[2]);
+            if (n==='[器械点A]'||n==='A') { state.ax=x; state.ay=y; state.nameA=''; document.getElementById('ax').value=x; document.getElementById('ay').value=y; }
+            else if (n==='[後視点B]'||n==='B') { state.bx=x; state.by=y; state.nameB=''; document.getElementById('bx').value=x; document.getElementById('by').value=y; }
+            else if (!isNaN(x)&&!isNaN(y)) newPts.push({name:n, x, y, done:(c[3]&&c[3].includes('済'))});
+          }
+        }
+      });
+      if (newPts.length>0) { state.points = newPts; state.selectedIndex = 0; updateLabels(); saveLocalStorage(); renderTable(); resetView(); alert(`${newPts.length}件読込完了`); }
+    };
+    reader.readAsText(file, 'Shift_JIS'); e.target.value = '';
+  }
+  function exportCSV() {
+    let csv = "点名,X座標,Y座標,打設状態\n";
+    csv += `[器械点A],${state.ax},${state.ay},-\n[後視点B],${state.bx},${state.by},-\n`;
+    state.points.forEach(p => { csv += `${p.name},${p.x},${p.y},${p.done?'打設済':'未'}\n`; });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: "text/csv;charset=utf-8;" }));
+    a.download = `境界逆打ちV2_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+  }
+</script>
+
+</body>
+</html>
