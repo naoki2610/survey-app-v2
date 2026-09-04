@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-<title>現場境界逆打ち計算システム V2</title>
+<title>現場境界逆打ち計算システム V2.1</title>
 
 <!-- PWA 設定 -->
 <link rel="manifest" href="./manifest.json">
@@ -62,10 +62,9 @@
   tr.active-row { background-color: var(--active-row) !important; font-weight: bold; outline: 2px solid var(--border); }
   
   .canvas-card { display: flex; flex-direction: column; height: calc(100vh - 170px); min-height: 400px; margin-top:0;}
-  .canvas-wrapper { flex: 1; position: relative; width: 100%; height: 100%; background: var(--canvas-bg); border: var(--border-width) solid var(--border); border-radius: 6px; overflow: hidden; touch-action: none; /* スクロール防止 */ }
+  .canvas-wrapper { flex: 1; position: relative; width: 100%; height: 100%; background: var(--canvas-bg); border: var(--border-width) solid var(--border); border-radius: 6px; overflow: hidden; touch-action: none; }
   canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
   
-  /* モーダルUI */
   #modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 999; justify-content: center; align-items: center; }
   .modal-content { background: #fff; padding: 20px; border-radius: 8px; width: 90%; max-width: 320px; color: #000; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
   .toast { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: #f59e0b; color: #fff; padding: 8px 16px; border-radius: 20px; font-weight: bold; font-size: 0.9rem; z-index: 10; pointer-events: none; opacity: 0; transition: opacity 0.3s; }
@@ -74,14 +73,13 @@
 <body>
 
 <header>
-  <h1>📐 現場境界逆打ち計算 V2</h1>
+  <h1>📐 現場境界逆打ち計算 V2.1</h1>
   <button class="theme-btn" id="btn-theme" onclick="toggleSunlightMode()">☀️ 日照</button>
 </header>
 
 <div class="app-layout">
   <!-- 左カラム -->
   <div>
-    <!-- 画像・図面設定パネル (NEW) -->
     <div class="card" style="background-color: #f8fafc;">
       <div class="card-title" style="color:#0f766e; border-color:#0f766e;">画像・オルソ図面 背景設定</div>
       <div style="display: flex; gap: 6px;">
@@ -92,7 +90,6 @@
       </div>
     </div>
 
-    <!-- 基準点設定 -->
     <div class="card">
       <div class="grid-2">
         <div><label id="label-ax">器械点 A: X</label><input type="number" step="any" id="ax" oninput="saveAndRecalc()"></div>
@@ -102,7 +99,6 @@
       </div>
     </div>
 
-    <!-- 境界点リスト -->
     <div class="card">
       <div class="card-title">
         <span>設置点 / 境界点リスト</span>
@@ -169,11 +165,10 @@
   </div>
 </div>
 
-<!-- 位置合わせ用モーダル -->
 <div id="modal-overlay">
   <div class="modal-content">
     <h3 style="margin-top:0; color:#0f766e;">対応する測量点を選択</h3>
-    <p style="font-size:0.85rem; color:#475569;">タップした場所の測量座標（基準点など）を選んでください。</p>
+    <p style="font-size:0.85rem; color:#475569;">タップした場所の測量座標を選んでください。</p>
     <select id="calib-point-select" style="width:100%; padding:10px; font-size:1.1rem; margin-bottom:20px; font-weight:bold;"></select>
     <div style="display:flex; gap:10px;">
       <button class="btn btn-primary" style="flex:1;" onclick="submitCalib()">確定</button>
@@ -184,98 +179,78 @@
 
 <script>
   let state = {
-    theme: 'default',
-    ax: 0, ay: 0, bx: 10, by: 0, nameA: '', nameB: '',
-    points: [], selectedIndex: 0,
-    imgCalib: null // {px1, py1, gx1, gy1, px2, py2, gx2, gy2}
+    theme: 'default', ax: 0, ay: 0, bx: 10, by: 0, nameA: '', nameB: '',
+    points: [], selectedIndex: 0, imgCalib: null
   };
-
-  // 画像オブジェクト (データ容量削減のためLocalStorageには保存せずメモリ保持)
+  
   let imgObj = null;
+  let imgUncalib = { cx: 0, cy: 0, s: 1 }; // 未確定画像の仮配置データ
 
-  // キャンバス表示用変数 (パン・ズーム)
   let view = { cx: 0, cy: 0, scale: 10 }; 
-  let isDragging = false;
-  let lastX = 0, lastY = 0;
-  let initialPinchDist = null;
-  let initialScale = null;
-
-  // キャリブレーション用状態
-  let calibStep = 0; // 0:Off, 1:Wait Point1, 2:Wait Point2
-  let calibTemp = {};
+  let isDragging = false; let lastX = 0, lastY = 0;
+  let initialPinchDist = null; let initialScale = null;
+  let calibStep = 0; let calibTemp = {};
 
   window.addEventListener('DOMContentLoaded', () => {
-    loadLocalStorage();
-    applyTheme();
-    renderTable();
-    initCanvasEvents();
-    if(state.points.length > 0) resetView(); // 初回フィット
-    else calculateAndDraw();
+    loadLocalStorage(); applyTheme(); renderTable(); initCanvasEvents();
+    if(state.points.length > 0) resetView(); else calculateAndDraw();
     window.addEventListener('resize', calculateAndDraw);
   });
 
   // --- 画像 & 位置合わせ ロジック ---
   function loadImage(e) {
-    const file = e.target.files[0];
-    if (!file) return;
+    const file = e.target.files[0]; if (!file) return;
     const reader = new FileReader();
     reader.onload = function(evt) {
       imgObj = new Image();
       imgObj.onload = () => { 
+        // 読み込んだ画像を、測量点群の広さ（spanY）に合わせて仮のスケールと中心位置を設定
+        let allY = [state.ay, state.by]; state.points.forEach(p=>allY.push(p.y));
+        let allX = [state.ax, state.bx]; state.points.forEach(p=>allX.push(p.x));
+        let spanY = (Math.max(...allY) - Math.min(...allY)) || 50;
+        
+        imgUncalib.cx = (Math.max(...allY) + Math.min(...allY))/2;
+        imgUncalib.cy = (Math.max(...allX.map(x=>-x)) + Math.min(...allX.map(x=>-x)))/2;
+        imgUncalib.s = (spanY * 1.5) / imgObj.width || 0.1; // 点群の1.5倍の広さで仮配置
+
         resetView(); 
         showToast('画像を読み込みました'); 
       };
       imgObj.src = evt.target.result;
     };
-    reader.readAsDataURL(file);
-    e.target.value = '';
+    reader.readAsDataURL(file); e.target.value = '';
   }
 
   function clearImage() {
     if(confirm('背景画像と位置合わせ設定をクリアしますか？')) {
-      imgObj = null;
-      state.imgCalib = null;
-      calibStep = 0;
-      saveLocalStorage();
-      calculateAndDraw();
+      imgObj = null; state.imgCalib = null; calibStep = 0;
+      saveLocalStorage(); calculateAndDraw();
     }
   }
 
   function showToast(msg) {
-    const t = document.getElementById('toast-msg');
-    t.textContent = msg;
-    t.style.opacity = '1';
+    const t = document.getElementById('toast-msg'); t.textContent = msg; t.style.opacity = '1';
     setTimeout(() => { if(calibStep===0) t.style.opacity = '0'; }, 3000);
   }
 
   function startCalibration() {
-    if (!imgObj) return alert('先に「画像読込」から図面やオルソ画像を読み込んでください。');
-    if (state.points.length === 0 && state.ax === 0 && state.bx === 0) return alert('座標データがありません。「座標読込」からデータを読み込んでください。');
-    
-    calibStep = 1;
-    showToast('【1点目】図面上の基準点(T-1等)をタップ');
+    if (!imgObj) return alert('先に「画像読込」から画像を読み込んでください。');
+    if (state.points.length === 0 && state.ax === 0 && state.bx === 0) return alert('先に座標データを読み込んでください。');
+    calibStep = 1; showToast('【1点目】ズームして図面上の基準点をタップ');
   }
 
   function openCalibModal(step) {
-    const sel = document.getElementById('calib-point-select');
-    sel.innerHTML = '';
-    // A, B, Pointsをリスト化
-    const addOpt = (label, gx, gy) => {
-      const o = document.createElement('option');
-      o.value = `${gx},${gy}`; o.textContent = label; sel.appendChild(o);
-    };
+    const sel = document.getElementById('calib-point-select'); sel.innerHTML = '';
+    const addOpt = (label, gx, gy) => { const o = document.createElement('option'); o.value = `${gx},${gy}`; o.textContent = label; sel.appendChild(o); };
     if(state.nameA || state.ax!==0) addOpt(`器械点A: ${state.nameA}`, state.ax, state.ay);
     if(state.nameB || state.bx!==0) addOpt(`後視点B: ${state.nameB}`, state.bx, state.by);
     state.points.forEach(p => addOpt(`境界/基準: ${p.name}`, p.x, p.y));
-    
     document.getElementById('modal-overlay').style.display = 'flex';
   }
 
   function cancelCalib() {
-    document.getElementById('modal-overlay').style.display = 'none';
-    calibStep = 0;
-    showToast('位置合わせをキャンセルしました');
-    setTimeout(() => { document.getElementById('toast-msg').style.opacity = '0'; }, 1000);
+    document.getElementById('modal-overlay').style.display = 'none'; calibStep = 0;
+    showToast('位置合わせをキャンセルしました'); setTimeout(() => { document.getElementById('toast-msg').style.opacity = '0'; }, 1000);
   }
 
   function submitCalib() {
@@ -284,17 +259,10 @@
     document.getElementById('modal-overlay').style.display = 'none';
 
     if (calibStep === 1) {
-      calibTemp.gx1 = gx; calibTemp.gy1 = gy;
-      calibStep = 2;
-      showToast('【2点目】図面上の別の基準点をタップ');
+      calibTemp.gx1 = gx; calibTemp.gy1 = gy; calibStep = 2; showToast('【2点目】ズームして図面上の別の基準点をタップ');
     } else if (calibStep === 2) {
-      calibTemp.gx2 = gx; calibTemp.gy2 = gy;
-      state.imgCalib = { ...calibTemp };
-      calibStep = 0;
-      saveLocalStorage();
-      calculateAndDraw();
-      showToast('位置合わせ完了！(図面が測量座標とリンクしました)');
-      setTimeout(() => { document.getElementById('toast-msg').style.opacity = '0'; }, 3000);
+      calibTemp.gx2 = gx; calibTemp.gy2 = gy; state.imgCalib = { ...calibTemp }; calibStep = 0;
+      saveLocalStorage(); calculateAndDraw(); showToast('位置合わせ完了！'); setTimeout(() => { document.getElementById('toast-msg').style.opacity = '0'; }, 3000);
     }
   }
 
@@ -302,81 +270,54 @@
   function initCanvasEvents() {
     const cvs = document.getElementById('plotCanvas');
     
-    cvs.addEventListener('mousedown', (e) => {
-      if(e.button !== 0) return;
-      isDragging = true; lastX = e.clientX; lastY = e.clientY;
-    });
+    cvs.addEventListener('mousedown', (e) => { if(e.button !== 0) return; isDragging = true; lastX = e.clientX; lastY = e.clientY; });
     window.addEventListener('mouseup', () => { isDragging = false; });
     window.addEventListener('mousemove', (e) => {
       if (!isDragging) return;
-      const dx = e.clientX - lastX; const dy = e.clientY - lastY;
-      view.cx -= dx / view.scale; view.cy -= dy / view.scale; // PlotXY = Y, -X
-      lastX = e.clientX; lastY = e.clientY;
-      calculateAndDraw();
+      view.cx -= (e.clientX - lastX) / view.scale; view.cy -= (e.clientY - lastY) / view.scale;
+      lastX = e.clientX; lastY = e.clientY; calculateAndDraw();
     });
 
     cvs.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      const rect = cvs.getBoundingClientRect();
-      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-      zoomCanvas(e.deltaY < 0 ? 1.15 : 1/1.15, mx, my);
+      e.preventDefault(); const rect = cvs.getBoundingClientRect();
+      zoomCanvas(e.deltaY < 0 ? 1.15 : 1/1.15, e.clientX - rect.left, e.clientY - rect.top);
     }, {passive: false});
 
-    // タッチ対応 (スマホ/タブレット)
     cvs.addEventListener('touchstart', (e) => {
       e.preventDefault();
-      if(e.touches.length === 1) {
-        isDragging = true; lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
-      } else if (e.touches.length === 2) {
-        isDragging = false;
-        initialPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-        initialScale = view.scale;
-      }
+      if(e.touches.length === 1) { isDragging = true; lastX = e.touches[0].clientX; lastY = e.touches[0].clientY; } 
+      else if (e.touches.length === 2) { isDragging = false; initialPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); initialScale = view.scale; }
     }, {passive: false});
     
     cvs.addEventListener('touchmove', (e) => {
       e.preventDefault();
       if(isDragging && e.touches.length === 1) {
-        const dx = e.touches[0].clientX - lastX; const dy = e.touches[0].clientY - lastY;
-        view.cx -= dx / view.scale; view.cy -= dy / view.scale;
-        lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
-        calculateAndDraw();
+        view.cx -= (e.touches[0].clientX - lastX) / view.scale; view.cy -= (e.touches[0].clientY - lastY) / view.scale;
+        lastX = e.touches[0].clientX; lastY = e.touches[0].clientY; calculateAndDraw();
       } else if (e.touches.length === 2 && initialPinchDist) {
         const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-        const ratio = dist / initialPinchDist;
-        const rect = cvs.getBoundingClientRect();
-        const mx = ((e.touches[0].clientX + e.touches[1].clientX)/2) - rect.left;
-        const my = ((e.touches[0].clientY + e.touches[1].clientY)/2) - rect.top;
+        const ratio = dist / initialPinchDist; const rect = cvs.getBoundingClientRect();
+        const mx = ((e.touches[0].clientX + e.touches[1].clientX)/2) - rect.left, my = ((e.touches[0].clientY + e.touches[1].clientY)/2) - rect.top;
         
-        // ズーム中心を維持してスケール変更
-        const plotX = (mx - cvs.width/2) / view.scale + view.cx;
-        const plotY = (my - cvs.height/2) / view.scale + view.cy;
+        const plotX = (mx - cvs.width/2) / view.scale + view.cx; const plotY = (my - cvs.height/2) / view.scale + view.cy;
         view.scale = initialScale * ratio;
-        view.cx = plotX - (mx - cvs.width/2) / view.scale;
-        view.cy = plotY - (my - cvs.height/2) / view.scale;
+        view.cx = plotX - (mx - cvs.width/2) / view.scale; view.cy = plotY - (my - cvs.height/2) / view.scale;
         calculateAndDraw();
       }
     }, {passive: false});
     
-    cvs.addEventListener('touchend', (e) => {
-      isDragging = false; initialPinchDist = null;
-    });
+    cvs.addEventListener('touchend', () => { isDragging = false; initialPinchDist = null; });
 
-    // キャリブレーション用クリック処理
+    // タップ時の座標取得（キャリブレーション）
     cvs.addEventListener('click', (e) => {
       if (calibStep === 0) return;
       const rect = cvs.getBoundingClientRect();
-      const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
-      
-      const plotX = (sx - cvs.width/2) / view.scale + view.cx;
-      const plotY = (sy - cvs.height/2) / view.scale + view.cy;
-      // plotX = Y, plotY = -X (Geo)
+      const plotX = ((e.clientX - rect.left) - cvs.width/2) / view.scale + view.cx;
+      const plotY = ((e.clientY - rect.top) - cvs.height/2) / view.scale + view.cy;
       
       let px, py;
       if (state.imgCalib) {
-        // すでに位置合わせ済みの場合は逆変換
-        const cal = state.imgCalib;
-        const sG1 = { x: cal.gy1, y: -cal.gx1 };
+        const cal = state.imgCalib; const sG1 = { x: cal.gy1, y: -cal.gx1 };
         const dp = Math.hypot(cal.px2 - cal.px1, cal.py2 - cal.py1);
         const dg = Math.hypot(cal.gy2 - cal.gy1, (-cal.gx2) - (-cal.gx1));
         const S = dg / dp;
@@ -385,10 +326,9 @@
         px = cal.px1 + (1/S) * (dx * Math.cos(-R) - dy * Math.sin(-R));
         py = cal.py1 + (1/S) * (dx * Math.sin(-R) + dy * Math.cos(-R));
       } else {
-        // 未位置合わせ（中央表示状態）
-        const S = (cvs.width / imgObj.width) / view.scale * 0.9;
-        px = (plotX - view.cx) / S + imgObj.width/2;
-        py = (plotY - view.cy) / S + imgObj.height/2;
+        // 未位置合わせ画像上のピクセルを逆算 (ズーム対応版)
+        px = (plotX - imgUncalib.cx) / imgUncalib.s + imgObj.width/2;
+        py = (plotY - imgUncalib.cy) / imgUncalib.s + imgObj.height/2;
       }
       
       if(calibStep === 1) { calibTemp.px1 = px; calibTemp.py1 = py; openCalibModal(1); }
@@ -398,25 +338,16 @@
 
   function zoomCanvas(factor, mx, my) {
     const cvs = document.getElementById('plotCanvas');
-    const plotX = (mx - cvs.width/2) / view.scale + view.cx;
-    const plotY = (my - cvs.height/2) / view.scale + view.cy;
+    const plotX = (mx - cvs.width/2) / view.scale + view.cx, plotY = (my - cvs.height/2) / view.scale + view.cy;
     view.scale *= factor;
-    view.cx = plotX - (mx - cvs.width/2) / view.scale;
-    view.cy = plotY - (my - cvs.height/2) / view.scale;
+    view.cx = plotX - (mx - cvs.width/2) / view.scale; view.cy = plotY - (my - cvs.height/2) / view.scale;
     calculateAndDraw();
   }
 
   function resetView() {
-    const cvs = document.getElementById('plotCanvas');
-    const p = cvs.parentElement; cvs.width = p.clientWidth; cvs.height = p.clientHeight;
-    
-    let allY = [state.ay, state.by], allX = [state.ax, state.bx];
-    state.points.forEach(pt => { allY.push(pt.y); allX.push(pt.x); });
-    
-    // Plot座標系でのMin/Max (plotX=Y, plotY=-X)
-    let minPx = Math.min(...allY), maxPx = Math.max(...allY);
-    let minPy = Math.min(...allX.map(x=>-x)), maxPy = Math.max(...allX.map(x=>-x));
-    
+    const cvs = document.getElementById('plotCanvas'); const p = cvs.parentElement; cvs.width = p.clientWidth; cvs.height = p.clientHeight;
+    let allY = [state.ay, state.by], allX = [state.ax, state.bx]; state.points.forEach(pt => { allY.push(pt.y); allX.push(pt.x); });
+    let minPx = Math.min(...allY), maxPx = Math.max(...allY), minPy = Math.min(...allX.map(x=>-x)), maxPy = Math.max(...allX.map(x=>-x));
     const spanX = (maxPx - minPx) || 20, spanY = (maxPy - minPy) || 20;
     view.cx = (minPx + maxPx) / 2; view.cy = (minPy + maxPy) / 2;
     view.scale = Math.min((cvs.width - 60) / spanX, (cvs.height - 60) / spanY);
@@ -424,15 +355,11 @@
   }
 
   // --- 既存のアプリロジック ---
-  function saveLocalStorage() {
-    localStorage.setItem('survey_gyakuuchi_v2', JSON.stringify(state));
-  }
+  function saveLocalStorage() { localStorage.setItem('survey_gyakuuchi_v2', JSON.stringify(state)); }
   function loadLocalStorage() {
-    const saved = localStorage.getItem('survey_gyakuuchi_v2');
-    if (saved) { try { state = JSON.parse(saved); } catch (e) {} }
+    const saved = localStorage.getItem('survey_gyakuuchi_v2'); if (saved) { try { state = JSON.parse(saved); } catch (e) {} }
     document.getElementById('ax').value = state.ax ?? ''; document.getElementById('ay').value = state.ay ?? '';
-    document.getElementById('bx').value = state.bx ?? ''; document.getElementById('by').value = state.by ?? '';
-    updateLabels();
+    document.getElementById('bx').value = state.bx ?? ''; document.getElementById('by').value = state.by ?? ''; updateLabels();
   }
   function saveAndRecalc() {
     state.ax = parseFloat(document.getElementById('ax').value)||0; state.ay = parseFloat(document.getElementById('ay').value)||0;
@@ -440,24 +367,13 @@
     saveLocalStorage(); calculateAndDraw();
   }
   function updateLabels() {
-    document.getElementById('label-ax').textContent = state.nameA ? `A [${state.nameA}]: X` : `器械点 A: X`;
-    document.getElementById('label-ay').textContent = state.nameA ? `A [${state.nameA}]: Y` : `器械点 A: Y`;
-    document.getElementById('label-bx').textContent = state.nameB ? `B [${state.nameB}]: X` : `後視点 B: X`;
-    document.getElementById('label-by').textContent = state.nameB ? `B [${state.nameB}]: Y` : `後視点 B: Y`;
+    document.getElementById('label-ax').textContent = state.nameA ? `A [${state.nameA}]: X` : `器械点 A: X`; document.getElementById('label-ay').textContent = state.nameA ? `A [${state.nameA}]: Y` : `器械点 A: Y`;
+    document.getElementById('label-bx').textContent = state.nameB ? `B [${state.nameB}]: X` : `後視点 B: X`; document.getElementById('label-by').textContent = state.nameB ? `B [${state.nameB}]: Y` : `後視点 B: Y`;
   }
-  function setAsA(e, idx) {
-    e.stopPropagation(); const pt = state.points[idx];
-    document.getElementById('ax').value = pt.x; document.getElementById('ay').value = pt.y;
-    state.nameA = pt.name; updateLabels(); saveAndRecalc(); resetView();
-  }
-  function setAsB(e, idx) {
-    e.stopPropagation(); const pt = state.points[idx];
-    document.getElementById('bx').value = pt.x; document.getElementById('by').value = pt.y;
-    state.nameB = pt.name; updateLabels(); saveAndRecalc(); resetView();
-  }
+  function setAsA(e, idx) { e.stopPropagation(); const pt = state.points[idx]; document.getElementById('ax').value = pt.x; document.getElementById('ay').value = pt.y; state.nameA = pt.name; updateLabels(); saveAndRecalc(); resetView(); }
+  function setAsB(e, idx) { e.stopPropagation(); const pt = state.points[idx]; document.getElementById('bx').value = pt.x; document.getElementById('by').value = pt.y; state.nameB = pt.name; updateLabels(); saveAndRecalc(); resetView(); }
   function addPointFromInput() {
-    const name = document.getElementById('new-name').value.trim() || `P-${state.points.length + 1}`;
-    const x = parseFloat(document.getElementById('new-x').value), y = parseFloat(document.getElementById('new-y').value);
+    const name = document.getElementById('new-name').value.trim() || `P-${state.points.length + 1}`; const x = parseFloat(document.getElementById('new-x').value), y = parseFloat(document.getElementById('new-y').value);
     if(isNaN(x)||isNaN(y)) return alert('数値を正しく入力してください。');
     state.points.push({ name, x, y, done: false }); state.selectedIndex = state.points.length - 1;
     document.getElementById('new-name').value=''; document.getElementById('new-x').value=''; document.getElementById('new-y').value='';
@@ -476,49 +392,36 @@
     } else pt.done = false;
     saveLocalStorage(); renderTable(); calculateAndDraw();
   }
-  function clearAllPoints() {
-    if(confirm('すべて消去しますか？')) { state.points=[]; state.selectedIndex=0; state.nameA=''; state.nameB=''; updateLabels(); saveLocalStorage(); renderTable(); calculateAndDraw(); }
-  }
+  function clearAllPoints() { if(confirm('すべて消去しますか？')) { state.points=[]; state.selectedIndex=0; state.nameA=''; state.nameB=''; updateLabels(); saveLocalStorage(); renderTable(); calculateAndDraw(); } }
 
   function renderTable() {
     const tbody = document.getElementById('point-list-body'); tbody.innerHTML = '';
     state.points.forEach((pt, idx) => {
-      const tr = document.createElement('tr');
-      if(idx === state.selectedIndex) tr.className = 'active-row';
-      tr.onclick = () => selectPoint(idx);
+      const tr = document.createElement('tr'); if(idx === state.selectedIndex) tr.className = 'active-row'; tr.onclick = () => selectPoint(idx);
       tr.innerHTML = `<td>${pt.done ? '✔' : idx+1}</td><td><strong>${pt.name}</strong></td><td>${pt.x.toFixed(3)}</td><td>${pt.y.toFixed(3)}</td>
-        <td style="text-align:right; white-space:nowrap;">
-          <button class="btn-action" onclick="setAsA(event,${idx})">A</button><button class="btn-action" onclick="setAsB(event,${idx})">B</button><button class="btn-action" style="color:red;" onclick="deletePoint(event,${idx})">×</button>
-        </td>`;
+        <td style="text-align:right; white-space:nowrap;"><button class="btn-action" onclick="setAsA(event,${idx})">A</button><button class="btn-action" onclick="setAsB(event,${idx})">B</button><button class="btn-action" style="color:red;" onclick="deletePoint(event,${idx})">×</button></td>`;
       tbody.appendChild(tr);
     });
     const bs = document.getElementById('btn-status');
     if(state.points.length>0 && state.points[state.selectedIndex]) {
-      const cur = state.points[state.selectedIndex];
-      bs.textContent = cur.done ? '✔ 完了 (取消)' : '✔ 確定して次へ';
-      bs.style.background = cur.done ? 'var(--bg-body)' : 'var(--primary)';
-      bs.style.color = cur.done ? 'var(--text-main)' : '#fff';
+      const cur = state.points[state.selectedIndex]; bs.textContent = cur.done ? '✔ 完了 (取消)' : '✔ 確定して次へ';
+      bs.style.background = cur.done ? 'var(--bg-body)' : 'var(--primary)'; bs.style.color = cur.done ? 'var(--text-main)' : '#fff';
     }
   }
 
   function calculateAndDraw() {
     const ax = state.ax, ay = state.ay, bx = state.bx, by = state.by, cur = state.points[state.selectedIndex];
-    const dxA = bx-ax, dyA = by-ay;
-    let azAB = Math.atan2(dyA, dxA); if(azAB<0) azAB+=2*Math.PI;
+    const dxA = bx-ax, dyA = by-ay; let azAB = Math.atan2(dyA, dxA); if(azAB<0) azAB+=2*Math.PI;
     
     if(!cur) {
       document.getElementById('target-name').textContent = '未選択'; document.getElementById('res-angle').textContent = '---'; document.getElementById('res-dist').textContent = '---';
     } else {
-      let azAP = Math.atan2(cur.y-ay, cur.x-ax); if(azAP<0) azAP+=2*Math.PI;
-      let diff = azAP - azAB; if(diff<0) diff+=2*Math.PI;
-      const dist = Math.hypot(cur.x-ax, cur.y-ay);
-      
-      let deg = diff * 180/Math.PI;
+      let azAP = Math.atan2(cur.y-ay, cur.x-ax); if(azAP<0) azAP+=2*Math.PI; let diff = azAP - azAB; if(diff<0) diff+=2*Math.PI;
+      const dist = Math.hypot(cur.x-ax, cur.y-ay); let deg = diff * 180/Math.PI;
       const d = Math.floor(deg), mTotal = (deg-d)*60, m = Math.floor(mTotal), s = Math.round((mTotal-m)*60);
       const sStr = s<10?'0'+s:s, mStr = m<10?'0'+m:m;
       document.getElementById('target-name').textContent = cur.name;
-      document.getElementById('res-angle').textContent = `${d}°${mStr}'${sStr}"`;
-      document.getElementById('res-dist').textContent = dist.toFixed(3) + ' m';
+      document.getElementById('res-angle').textContent = `${d}°${mStr}'${sStr}"`; document.getElementById('res-dist').textContent = dist.toFixed(3) + ' m';
     }
     drawPlot();
   }
@@ -526,47 +429,35 @@
   function drawPlot() {
     const cvs = document.getElementById('plotCanvas'); const ctx = cvs.getContext('2d');
     const p = cvs.parentElement; cvs.width = p.clientWidth; cvs.height = p.clientHeight;
-    ctx.clearRect(0, 0, cvs.width, cvs.height);
-    const isSun = state.theme === 'sunlight';
+    ctx.clearRect(0, 0, cvs.width, cvs.height); const isSun = state.theme === 'sunlight';
     
-    // 背景画像の描画
     if (imgObj && imgObj.complete) {
       ctx.save();
-      // Plot座標系への基本変換
-      ctx.translate(cvs.width/2, cvs.height/2);
-      ctx.scale(view.scale, view.scale);
-      ctx.translate(-view.cx, -view.cy);
+      // Plot空間への展開
+      ctx.translate(cvs.width/2, cvs.height/2); ctx.scale(view.scale, view.scale); ctx.translate(-view.cx, -view.cy);
       
       if (state.imgCalib) {
-        // 位置合わせ済み画像の配置
-        const c = state.imgCalib;
-        const sG1 = { x: c.gy1, y: -c.gx1 }, sG2 = { x: c.gy2, y: -c.gx2 };
-        const dp = Math.hypot(c.px2-c.px1, c.py2-c.py1);
-        const dg = Math.hypot(sG2.x-sG1.x, sG2.y-sG1.y);
-        const S = dg / dp;
+        const c = state.imgCalib; const sG1 = { x: c.gy1, y: -c.gx1 }, sG2 = { x: c.gy2, y: -c.gx2 };
+        const S = Math.hypot(sG2.x-sG1.x, sG2.y-sG1.y) / Math.hypot(c.px2-c.px1, c.py2-c.py1);
         const R = Math.atan2(sG2.y-sG1.y, sG2.x-sG1.x) - Math.atan2(c.py2-c.py1, c.px2-c.px1);
-        
         ctx.translate(sG1.x, sG1.y); ctx.rotate(R); ctx.scale(S, S); ctx.translate(-c.px1, -c.py1);
-        ctx.globalAlpha = 0.8; // 画像の透過度 (測量点を見やすくするため)
+        ctx.globalAlpha = 0.8;
       } else {
-        // 未位置合わせ (画面中央に仮表示)
-        const S = (cvs.width / imgObj.width) / view.scale * 0.9;
-        ctx.translate(view.cx, view.cy); ctx.scale(S, S); ctx.translate(-imgObj.width/2, -imgObj.height/2);
-        ctx.globalAlpha = 0.5;
+        // 未位置合わせ（ズーム連動）
+        ctx.translate(imgUncalib.cx, imgUncalib.cy); 
+        ctx.scale(imgUncalib.s, imgUncalib.s); 
+        ctx.translate(-imgObj.width/2, -imgObj.height/2);
+        ctx.globalAlpha = 0.7; // 確認しやすく少し透過
       }
-      ctx.drawImage(imgObj, 0, 0);
-      ctx.restore();
+      ctx.drawImage(imgObj, 0, 0); ctx.restore();
     }
 
-    // 測量点の描画用変換関数 (スケール依存しないサイズで描画するため手動計算)
     const toScreen = (gx, gy) => ({ x: cvs.width/2 + (gy - view.cx)*view.scale, y: cvs.height/2 + (-gx - view.cy)*view.scale });
     const scrA = toScreen(state.ax, state.ay), scrB = toScreen(state.bx, state.by);
 
-    // 視準線
     ctx.beginPath(); ctx.strokeStyle = isSun?'#000':'#64748b'; ctx.lineWidth=2; ctx.setLineDash([5,5]);
     ctx.moveTo(scrA.x, scrA.y); ctx.lineTo(scrB.x, scrB.y); ctx.stroke(); ctx.setLineDash([]);
     
-    // 目標誘導線
     const cur = state.points[state.selectedIndex];
     if (cur) {
       const scrP = toScreen(cur.x, cur.y);
@@ -574,10 +465,8 @@
       ctx.moveTo(scrA.x, scrA.y); ctx.lineTo(scrP.x, scrP.y); ctx.stroke();
     }
 
-    // 全点のプロット
     state.points.forEach((pt, i) => {
-      const scrP = toScreen(pt.x, pt.y);
-      const isTarget = (i === state.selectedIndex);
+      const scrP = toScreen(pt.x, pt.y); const isTarget = (i === state.selectedIndex);
       ctx.beginPath(); ctx.arc(scrP.x, scrP.y, isTarget?7:4, 0, Math.PI*2);
       ctx.fillStyle = pt.done ? (isSun?'#000':'#15803d') : (isTarget ? (isSun?'#000':'#2563eb') : '#94a3b8');
       ctx.fill(); ctx.strokeStyle = isSun?'#000':'#fff'; ctx.lineWidth=1.5; ctx.stroke();
@@ -585,10 +474,8 @@
       ctx.fillText(pt.name, scrP.x+8, scrP.y-4);
     });
 
-    // 器械点A
     ctx.beginPath(); ctx.arc(scrA.x, scrA.y, 7, 0, Math.PI*2); ctx.fillStyle = isSun?'#000':'#dc2626'; ctx.fill(); ctx.stroke();
     ctx.font = 'bold 12px sans-serif'; ctx.fillText('A', scrA.x+9, scrA.y+12);
-    // 後視点B
     ctx.beginPath(); ctx.arc(scrB.x, scrB.y, 5, 0, Math.PI*2); ctx.fillStyle = isSun?'#000':'#64748b'; ctx.fill();
     ctx.fillText('B', scrB.x+7, scrB.y-5);
   }
@@ -597,17 +484,13 @@
   function applyTheme() { const isSun=state.theme==='sunlight'; if(isSun) document.documentElement.setAttribute('data-theme','sunlight'); else document.documentElement.removeAttribute('data-theme'); }
   
   function importFile(e) {
-    const file = e.target.files[0]; if (!file) return;
-    const reader = new FileReader();
+    const file = e.target.files[0]; if (!file) return; const reader = new FileReader();
     reader.onload = function(evt) {
-      const lines = evt.target.result.split(/\r\n|\n/); const newPts = [];
-      const isSima = lines.some(l => l.startsWith('A01,'));
+      const lines = evt.target.result.split(/\r\n|\n/); const newPts = []; const isSima = lines.some(l => l.startsWith('A01,'));
       lines.forEach((line, idx) => {
         if (!line.trim()) return;
         if (isSima) {
-          if (line.startsWith('A01,')) {
-            const c = line.split(','); if (c.length>=5) { const x=parseFloat(c[3]),y=parseFloat(c[4]); if(!isNaN(x)&&!isNaN(y)) newPts.push({name:c[2].trim(), x, y, done:false}); }
-          }
+          if (line.startsWith('A01,')) { const c = line.split(','); if (c.length>=5) { const x=parseFloat(c[3]),y=parseFloat(c[4]); if(!isNaN(x)&&!isNaN(y)) newPts.push({name:c[2].trim(), x, y, done:false}); } }
         } else {
           if (idx===0 && line.includes('点名')) return;
           const c = line.split(','); if (c.length>=3) {
@@ -623,8 +506,7 @@
     reader.readAsText(file, 'Shift_JIS'); e.target.value = '';
   }
   function exportCSV() {
-    let csv = "点名,X座標,Y座標,打設状態\n";
-    csv += `[器械点A],${state.ax},${state.ay},-\n[後視点B],${state.bx},${state.by},-\n`;
+    let csv = "点名,X座標,Y座標,打設状態\n"; csv += `[器械点A],${state.ax},${state.ay},-\n[後視点B],${state.bx},${state.by},-\n`;
     state.points.forEach(p => { csv += `${p.name},${p.x},${p.y},${p.done?'打設済':'未'}\n`; });
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: "text/csv;charset=utf-8;" }));
     a.download = `境界逆打ちV2_${new Date().toISOString().slice(0,10)}.csv`; a.click();
