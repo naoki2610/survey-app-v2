@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-<title>現場境界逆打ち計算システム V2.1</title>
+<title>現場境界逆打ち計算システム V2.2</title>
 
 <!-- PWA 設定 -->
 <link rel="manifest" href="./manifest.json">
@@ -73,7 +73,7 @@
 <body>
 
 <header>
-  <h1>📐 現場境界逆打ち計算 V2.1</h1>
+  <h1>📐 現場境界逆打ち計算 V2.2</h1>
   <button class="theme-btn" id="btn-theme" onclick="toggleSunlightMode()">☀️ 日照</button>
 </header>
 
@@ -184,7 +184,7 @@
   };
   
   let imgObj = null;
-  let imgUncalib = { cx: 0, cy: 0, s: 1 }; // 未確定画像の仮配置データ
+  let imgUncalib = { cx: 0, cy: 0, s: 1 }; 
 
   let view = { cx: 0, cy: 0, scale: 10 }; 
   let isDragging = false; let lastX = 0, lastY = 0;
@@ -204,17 +204,15 @@
     reader.onload = function(evt) {
       imgObj = new Image();
       imgObj.onload = () => { 
-        // 読み込んだ画像を、測量点群の広さ（spanY）に合わせて仮のスケールと中心位置を設定
         let allY = [state.ay, state.by]; state.points.forEach(p=>allY.push(p.y));
         let allX = [state.ax, state.bx]; state.points.forEach(p=>allX.push(p.x));
         let spanY = (Math.max(...allY) - Math.min(...allY)) || 50;
         
         imgUncalib.cx = (Math.max(...allY) + Math.min(...allY))/2;
         imgUncalib.cy = (Math.max(...allX.map(x=>-x)) + Math.min(...allX.map(x=>-x)))/2;
-        imgUncalib.s = (spanY * 1.5) / imgObj.width || 0.1; // 点群の1.5倍の広さで仮配置
+        imgUncalib.s = (spanY * 1.5) / imgObj.width || 0.1; 
 
-        resetView(); 
-        showToast('画像を読み込みました'); 
+        resetView(); showToast('画像を読み込みました'); 
       };
       imgObj.src = evt.target.result;
     };
@@ -266,9 +264,37 @@
     }
   }
 
+  // --- スマホのタップ判定を処理する関数 ---
+  function handleCalibrationTap(clientX, clientY) {
+    if (calibStep === 0) return;
+    const cvs = document.getElementById('plotCanvas');
+    const rect = cvs.getBoundingClientRect();
+    const plotX = ((clientX - rect.left) - cvs.width/2) / view.scale + view.cx;
+    const plotY = ((clientY - rect.top) - cvs.height/2) / view.scale + view.cy;
+    
+    let px, py;
+    if (state.imgCalib) {
+      const cal = state.imgCalib; const sG1 = { x: cal.gy1, y: -cal.gx1 };
+      const dp = Math.hypot(cal.px2 - cal.px1, cal.py2 - cal.py1);
+      const dg = Math.hypot(cal.gy2 - cal.gy1, (-cal.gx2) - (-cal.gx1));
+      const S = dg / dp;
+      const R = Math.atan2(-cal.gx2 - (-cal.gx1), cal.gy2 - cal.gy1) - Math.atan2(cal.py2 - cal.py1, cal.px2 - cal.px1);
+      const dx = plotX - sG1.x, dy = plotY - sG1.y;
+      px = cal.px1 + (1/S) * (dx * Math.cos(-R) - dy * Math.sin(-R));
+      py = cal.py1 + (1/S) * (dx * Math.sin(-R) + dy * Math.cos(-R));
+    } else {
+      px = (plotX - imgUncalib.cx) / imgUncalib.s + imgObj.width/2;
+      py = (plotY - imgUncalib.cy) / imgUncalib.s + imgObj.height/2;
+    }
+    
+    if(calibStep === 1) { calibTemp.px1 = px; calibTemp.py1 = py; openCalibModal(1); }
+    else if(calibStep === 2) { calibTemp.px2 = px; calibTemp.py2 = py; openCalibModal(2); }
+  }
+
   // --- キャンバス パン＆ズーム イベント ---
   function initCanvasEvents() {
     const cvs = document.getElementById('plotCanvas');
+    let touchStartX = 0, touchStartY = 0, isTouchMoved = false;
     
     cvs.addEventListener('mousedown', (e) => { if(e.button !== 0) return; isDragging = true; lastX = e.clientX; lastY = e.clientY; });
     window.addEventListener('mouseup', () => { isDragging = false; });
@@ -283,15 +309,25 @@
       zoomCanvas(e.deltaY < 0 ? 1.15 : 1/1.15, e.clientX - rect.left, e.clientY - rect.top);
     }, {passive: false});
 
+    // --- スマホタッチ処理 ---
     cvs.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-      if(e.touches.length === 1) { isDragging = true; lastX = e.touches[0].clientX; lastY = e.touches[0].clientY; } 
-      else if (e.touches.length === 2) { isDragging = false; initialPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); initialScale = view.scale; }
+      e.preventDefault(); // デフォルトのスクロール動作をブロック
+      if(e.touches.length === 1) { 
+        isDragging = true; lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+        touchStartX = lastX; touchStartY = lastY; isTouchMoved = false;
+      } 
+      else if (e.touches.length === 2) { 
+        isDragging = false; initialPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); initialScale = view.scale; 
+      }
     }, {passive: false});
     
     cvs.addEventListener('touchmove', (e) => {
       e.preventDefault();
       if(isDragging && e.touches.length === 1) {
+        // 少しでも指が動いたら「移動」として判定する
+        if (Math.hypot(e.touches[0].clientX - touchStartX, e.touches[0].clientY - touchStartY) > 5) {
+          isTouchMoved = true;
+        }
         view.cx -= (e.touches[0].clientX - lastX) / view.scale; view.cy -= (e.touches[0].clientY - lastY) / view.scale;
         lastX = e.touches[0].clientX; lastY = e.touches[0].clientY; calculateAndDraw();
       } else if (e.touches.length === 2 && initialPinchDist) {
@@ -306,33 +342,17 @@
       }
     }, {passive: false});
     
-    cvs.addEventListener('touchend', () => { isDragging = false; initialPinchDist = null; });
-
-    // タップ時の座標取得（キャリブレーション）
-    cvs.addEventListener('click', (e) => {
-      if (calibStep === 0) return;
-      const rect = cvs.getBoundingClientRect();
-      const plotX = ((e.clientX - rect.left) - cvs.width/2) / view.scale + view.cx;
-      const plotY = ((e.clientY - rect.top) - cvs.height/2) / view.scale + view.cy;
-      
-      let px, py;
-      if (state.imgCalib) {
-        const cal = state.imgCalib; const sG1 = { x: cal.gy1, y: -cal.gx1 };
-        const dp = Math.hypot(cal.px2 - cal.px1, cal.py2 - cal.py1);
-        const dg = Math.hypot(cal.gy2 - cal.gy1, (-cal.gx2) - (-cal.gx1));
-        const S = dg / dp;
-        const R = Math.atan2(-cal.gx2 - (-cal.gx1), cal.gy2 - cal.gy1) - Math.atan2(cal.py2 - cal.py1, cal.px2 - cal.px1);
-        const dx = plotX - sG1.x, dy = plotY - sG1.y;
-        px = cal.px1 + (1/S) * (dx * Math.cos(-R) - dy * Math.sin(-R));
-        py = cal.py1 + (1/S) * (dx * Math.sin(-R) + dy * Math.cos(-R));
-      } else {
-        // 未位置合わせ画像上のピクセルを逆算 (ズーム対応版)
-        px = (plotX - imgUncalib.cx) / imgUncalib.s + imgObj.width/2;
-        py = (plotY - imgUncalib.cy) / imgUncalib.s + imgObj.height/2;
+    cvs.addEventListener('touchend', (e) => {
+      // 指を離したとき、もし指が「ほぼ動いていなかった（タップ）」なら確定処理を呼ぶ
+      if (calibStep > 0 && isDragging && !isTouchMoved && e.changedTouches.length === 1) {
+        handleCalibrationTap(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
       }
-      
-      if(calibStep === 1) { calibTemp.px1 = px; calibTemp.py1 = py; openCalibModal(1); }
-      else if(calibStep === 2) { calibTemp.px2 = px; calibTemp.py2 = py; openCalibModal(2); }
+      isDragging = false; initialPinchDist = null;
+    });
+
+    // PCのマウスクリック用
+    cvs.addEventListener('click', (e) => {
+      if (calibStep > 0) handleCalibrationTap(e.clientX, e.clientY);
     });
   }
 
@@ -433,7 +453,6 @@
     
     if (imgObj && imgObj.complete) {
       ctx.save();
-      // Plot空間への展開
       ctx.translate(cvs.width/2, cvs.height/2); ctx.scale(view.scale, view.scale); ctx.translate(-view.cx, -view.cy);
       
       if (state.imgCalib) {
@@ -443,11 +462,10 @@
         ctx.translate(sG1.x, sG1.y); ctx.rotate(R); ctx.scale(S, S); ctx.translate(-c.px1, -c.py1);
         ctx.globalAlpha = 0.8;
       } else {
-        // 未位置合わせ（ズーム連動）
         ctx.translate(imgUncalib.cx, imgUncalib.cy); 
         ctx.scale(imgUncalib.s, imgUncalib.s); 
         ctx.translate(-imgObj.width/2, -imgObj.height/2);
-        ctx.globalAlpha = 0.7; // 確認しやすく少し透過
+        ctx.globalAlpha = 0.7; 
       }
       ctx.drawImage(imgObj, 0, 0); ctx.restore();
     }
