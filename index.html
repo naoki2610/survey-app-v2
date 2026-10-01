@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-<title>現場境界逆打ち計算システム V2.4</title>
+<title>現場境界逆打ち計算システム V2.5</title>
 
 <!-- PWA 設定 -->
 <link rel="manifest" href="./manifest.json">
@@ -46,7 +46,7 @@
   input[type="text"], input[type="number"] { width: 100%; padding: 6px 8px; font-size: 1rem; font-weight: bold; border: var(--border-width) solid var(--border); border-radius: 6px; }
   
   .btn { display: inline-flex; justify-content: center; align-items: center; padding: 8px 12px; font-size: 0.9rem; font-weight: bold; border-radius: 6px; border: var(--border-width) solid var(--border); cursor: pointer; background: var(--btn-bg); color: var(--btn-text); touch-action: manipulation; }
-  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
   .btn-danger { background: #dc2626; color: #fff; border-color: #dc2626; }
   .btn-sm { padding: 4px 8px; font-size: 0.8rem; }
   .btn-action { width: 24px; height: 24px; border-radius: 4px; border: 1px solid var(--border); background: var(--btn-bg); font-weight: bold; font-size: 0.75rem; cursor: pointer; margin-left: 2px; }
@@ -65,7 +65,7 @@
   .canvas-card { display: flex; flex-direction: column; height: calc(100vh - 170px); min-height: 400px; margin-top:0;}
   .canvas-wrapper { flex: 1; position: relative; width: 100%; height: 100%; background: var(--canvas-bg); border: var(--border-width) solid var(--border); border-radius: 6px; overflow: hidden; touch-action: none; }
   canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
-  .canvas-locked { pointer-events: none; opacity: 0.8; }
+  .canvas-locked { pointer-events: none; opacity: 0.85; }
   
   .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 999; justify-content: center; align-items: center; }
   .modal-content { background: #fff; padding: 20px; border-radius: 8px; width: 90%; max-width: 360px; color: #000; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
@@ -76,7 +76,7 @@
 <body>
 
 <header>
-  <h1>📐 逆打ち計算 V2.4</h1>
+  <h1>📐 逆打ち計算 V2.5</h1>
   <div style="display: flex; gap:6px;">
     <button class="theme-btn" id="btn-theme" onclick="toggleSunlightMode()">☀️ 日照</button>
     <button class="theme-btn btn-danger" onclick="forceAppUpdate()">🔄 更新</button>
@@ -92,7 +92,7 @@
         <input type="file" id="image-upload" accept="image/*" style="display: none;" onchange="loadImage(event)">
         <button class="btn" style="flex:1; background:#ccfbf1; color:#0f766e;" onclick="document.getElementById('image-upload').click()">🖼 画像読込</button>
         <button class="btn" style="flex:1;" onclick="startCalibration()">📍 位置合わせ</button>
-        <button class="btn" style="flex:0.5;" onclick="clearImage()">🗑</button>
+        <button class="btn btn-danger" style="flex:0.5;" onclick="clearImage()">🗑</button>
       </div>
     </div>
 
@@ -270,25 +270,24 @@
     const cvs = document.getElementById('plotCanvas');
     if (isCanvasLocked) {
       btn.textContent = '🔒 ロック中';
-      btn.style.background = '#dc2626'; btn.style.color = '#fff';
+      btn.style.background = '#dc2626'; btn.style.color = '#fff'; btn.style.borderColor = '#dc2626';
       cvs.classList.add('canvas-locked');
     } else {
       btn.textContent = '🔓 画面ロック';
-      btn.style.background = ''; btn.style.color = '';
+      btn.style.background = ''; btn.style.color = ''; btn.style.borderColor = '';
       cvs.classList.remove('canvas-locked');
     }
   }
 
   // --- 任意点設置 (交会法) ロジック ---
-  // 【安全装置】度分秒の入力バリデーション (60分・60秒以上を弾く)
   function parseDMS(val) {
     if (!val) return null;
     const v = parseFloat(val);
     if (isNaN(v)) return null;
     const d = Math.floor(v);
     const m = Math.floor((v - d) * 100);
-    const s = Math.round(((v - d) * 100 - m) * 100); // 誤差吸収
-    if (m >= 60 || s >= 60) return null; // バリデーションエラー
+    const s = Math.round(((v - d) * 100 - m) * 100);
+    if (m >= 60 || s >= 60) return null; // 60分60秒以上はエラー
     return (d + m / 60 + s / 3600) * Math.PI / 180;
   }
 
@@ -313,16 +312,16 @@
   function calcResection() {
     const i1 = document.getElementById('res-pt1').value;
     const i2 = document.getElementById('res-pt2').value;
-    if(i1 === i2) return alert("異なる2点を選択してください。");
+    if(i1 === i2) return alert("エラー: 異なる2点を選択してください。");
     
     const pt1 = state.points[i1]; const pt2 = state.points[i2];
     const d1 = parseFloat(document.getElementById('res-d1').value);
     const d2 = parseFloat(document.getElementById('res-d2').value);
-    if(isNaN(d1) || isNaN(d2) || d1 <= 0 || d2 <= 0) return alert("水平距離を正しく入力してください。");
+    if(isNaN(d1) || isNaN(d2) || d1 <= 0 || d2 <= 0) return alert("エラー: 水平距離を正しく入力してください。(0より大きい数値)");
 
     const a1 = parseDMS(document.getElementById('res-a1').value);
     const a2 = parseDMS(document.getElementById('res-a2').value);
-    if(a1 === null || a2 === null) return alert("角度の入力が不正です。\n分・秒は「59」以下で入力してください。\n(例: 179°15'02\" ➔ 179.1502)");
+    if(a1 === null || a2 === null) return alert("エラー: 角度の入力が不正です。\n分・秒は「59」以下で入力してください。\n(例: 179°15'02\" ➔ 179.1502)");
     
     let theta = a2 - a1; if(theta < 0) theta += 2 * Math.PI;
 
@@ -368,14 +367,13 @@
   }
 
   // --- 画像 & 位置合わせ ロジック ---
-  // 【安全装置】巨大画像によるメモリクラッシュを防ぐ自動リサイズ
   function loadImage(e) {
     const file = e.target.files[0]; if (!file) return; 
     const reader = new FileReader();
     reader.onload = function(evt) {
       const tempImg = new Image();
       tempImg.onload = () => {
-        // 画像が巨大な場合はCanvasを使って縮小する (最大3000px)
+        // メモリ対策：巨大画像は自動リサイズ (最大3000px)
         const MAX_DIM = 3000;
         let w = tempImg.width, h = tempImg.height;
         if (w > MAX_DIM || h > MAX_DIM) {
@@ -387,11 +385,20 @@
         
         imgObj = new Image();
         imgObj.onload = () => { 
+          // 【V2.5新機能】前回の位置合わせデータを復元
+          if (state.imgCalib) {
+            if (confirm("前回の位置合わせ(キャリブレーション)データが保存されています。\nこの画像に適用しますか？\n※違う画像を読み込んだ場合は「キャンセル」を押してください。")) {
+              resetView(); showToast('前回の位置合わせを復元しました'); return;
+            } else {
+              state.imgCalib = null; saveLocalStorage();
+            }
+          }
+          
           let allY = [state.ay, state.by]; state.points.forEach(p=>allY.push(p.y)); let allX = [state.ax, state.bx]; state.points.forEach(p=>allX.push(p.x));
           let spanY = (Math.max(...allY) - Math.min(...allY)) || 50;
           imgUncalib.cx = (Math.max(...allY) + Math.min(...allY))/2; imgUncalib.cy = (Math.max(...allX.map(x=>-x)) + Math.min(...allX.map(x=>-x)))/2;
           imgUncalib.s = (spanY * 1.5) / imgObj.width || 0.1; 
-          resetView(); showToast('画像の読み込みと最適化が完了しました'); 
+          resetView(); showToast('画像を読み込みました'); 
         };
         imgObj.src = c.toDataURL('image/jpeg', 0.8); // 圧縮してメモリ解放
       };
@@ -439,14 +446,11 @@
       calibTemp.gx1 = gx; calibTemp.gy1 = gy; calibStep = 2; showToast('【2点目】ズームして図面上の別の基準点をタップ'); 
     } 
     else if (calibStep === 2) { 
-      // 【安全装置】ゼロ割り(同じ点のタップ)を防止
+      // ゼロ割り(同じ点のタップ)を防止
       const distGeo = Math.hypot(gx - calibTemp.gx1, gy - calibTemp.gy1);
       const distPx = Math.hypot(calibTemp.px2 - calibTemp.px1, calibTemp.py2 - calibTemp.py1);
       if (distGeo < 0.1 || distPx < 5) {
-        calibStep = 0;
-        alert("エラー: 選択した2点が近すぎる、または同じ点です。\n位置合わせを最初からやり直してください。");
-        showToast('位置合わせ失敗');
-        return;
+        calibStep = 0; alert("エラー: 選択した2点が近すぎる、または同じ点です。\n位置合わせを最初からやり直してください。"); showToast('位置合わせ失敗'); return;
       }
       calibTemp.gx2 = gx; calibTemp.gy2 = gy; state.imgCalib = { ...calibTemp }; calibStep = 0; 
       saveLocalStorage(); calculateAndDraw(); showToast('位置合わせ完了！'); setTimeout(() => { document.getElementById('toast-msg').style.opacity = '0'; }, 3000); 
@@ -549,7 +553,7 @@
     } else pt.done = false;
     saveLocalStorage(); renderTable(); calculateAndDraw();
   }
-  function clearAllPoints() { if(confirm('すべて消去しますか？')) { state.points=[]; state.selectedIndex=0; state.nameA=''; state.nameB=''; updateLabels(); saveLocalStorage(); renderTable(); calculateAndDraw(); } }
+  function clearAllPoints() { if(confirm('すべて消去しますか？\n※位置合わせの設定もリセットされます。')) { state.points=[]; state.selectedIndex=0; state.nameA=''; state.nameB=''; state.imgCalib = null; imgObj = null; updateLabels(); saveLocalStorage(); renderTable(); calculateAndDraw(); } }
 
   function renderTable() {
     const tbody = document.getElementById('point-list-body'); tbody.innerHTML = '';
